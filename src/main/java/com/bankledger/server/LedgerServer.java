@@ -11,6 +11,8 @@ import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class LedgerServer {
@@ -18,24 +20,35 @@ public class LedgerServer {
     private static final int PORT = 9090;
     private static final Path LOG_PATH = Path.of("transactions.log");
     private static final AtomicLong TXN_ID_SEQ = new AtomicLong(1);
+    private static final ExecutorService pool = Executors.newFixedThreadPool(3);
 
     public static void main(String[] args) throws IOException {
 
         LedgerWriter ledgerWriter = new LedgerWriter(LOG_PATH);
 
+        // When the application is terminated , this makes sure the thread pool is shut down gracefully.
+        //To make sure that the worker threads are not left running and ensures server exits cleanly.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            pool.shutdown();
+        }));
+
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("Ledgerserver is listening on port " + PORT);
 
+
+
             while (true) {
                 Socket client = serverSocket.accept();
-                handleClient(client, ledgerWriter);
+                pool.submit(() ->
+
+                        handleClient(client, ledgerWriter));
             }
         }
 
 
     }
 
-    private static void handleClient(Socket client, LedgerWriter ledgerWriter) throws IOException {
+    private static void handleClient(Socket client, LedgerWriter ledgerWriter) {
         try (client;
 
              BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
@@ -43,16 +56,22 @@ public class LedgerServer {
 
             String line = in.readLine();
             if (line == null || line.isBlank()) {
-                out.println("ERROR, empty_request");
+                out.println("ERROR,EMPTY_REQUEST");
                 return;
             }
 
-            Transaction txn = parseToTransaction(line);
-            ledgerWriter.append(txn);
+            try {
+                Transaction txn = parseToTransaction(line);
+                ledgerWriter.append(txn);
 
-            System.out.println("Transaction Saved: " + txn);
-            out.println("OK, " + txn.getTransactionId());
+                System.out.println("Transaction Saved: " + txn);
+                out.println("OK," + txn.getTransactionId());
+            } catch (IllegalArgumentException e) {
+                out.println("ERROR, invalid BAD_REQUEST");
+            }
 
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 

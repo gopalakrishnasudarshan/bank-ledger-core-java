@@ -15,7 +15,7 @@ public class LedgerWriter {
         this.logPath = logPath;
     }
 
-   public void append(Transaction transaction) throws IOException {
+   public synchronized void append(Transaction transaction) throws IOException {
         try(BufferedWriter writer = new BufferedWriter(new FileWriter(logPath.toFile(),true))){
 
            writer.write(toLine(transaction));

@@ -29,16 +29,27 @@ public class BankClient {
 //            throw new RuntimeException(e);
 //        }
 
-        try(Socket socket = new Socket(HOST,PORT);
-            PrintWriter out = new PrintWriter(socket.getOutputStream(),true);
-            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream())))
-            {
-              out.println("ACC01,DEPOSIT,50");
+       for(int i = 1; i<=5 ; i++)
+       {
+           final int clientId = i;
+           new Thread(() -> {
+               try (Socket socket = new Socket(HOST, PORT);
+                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                    BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
 
-                String response = in.readLine();
-                System.out.println("Server response: " + response);
-            }
+                   String request = "ACC0" + clientId + ",DEPOSIT," + (clientId * 10);
+                   out.println(request);
 
+                   String response = in.readLine();
+                   System.out.println("Client " + clientId + " response: " + response);
+
+               } catch (IOException e) {
+                   e.printStackTrace();
+               }
+           }).start();
+
+
+       }
     }
 }
 
