@@ -1,0 +1,14 @@
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+build/
+
+# Logs / runtime data
+transactions.log
+
+# OS files
+.DS_Store
+Thumbs.db
