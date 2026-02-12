@@ -29,7 +29,7 @@ public class BankClient {
 //            throw new RuntimeException(e);
 //        }
 
-       for(int i = 1; i<=5 ; i++)
+       for(int i = 1; i<=1 ; i++)
        {
            final int clientId = i;
            new Thread(() -> {
@@ -37,11 +37,14 @@ public class BankClient {
                     PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
                     BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
 
-                   String request = "ACC0" + clientId + ",DEPOSIT," + (clientId * 10);
+                   String request = "READ,0,10";
                    out.println(request);
 
-                   String response = in.readLine();
-                   System.out.println("Client " + clientId + " response: " + response);
+                   String response;
+                   while ((response = in.readLine()) != null) {
+                       System.out.println("Client "+clientId+": "+" response "+ response);
+                       if("END".equals(response)) break;
+                   }
 
                } catch (IOException e) {
                    e.printStackTrace();

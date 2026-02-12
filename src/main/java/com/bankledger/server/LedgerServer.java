@@ -4,10 +4,7 @@ import com.bankledger.model.Transaction;
 import com.bankledger.model.TransactionType;
 import com.bankledger.storage.LedgerWriter;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
@@ -59,6 +56,11 @@ public class LedgerServer {
                 out.println("ERROR,EMPTY_REQUEST");
                 return;
             }
+            if(line.startsWith("READ,"))
+            {
+                handleRead(line,out);
+                return;
+            }
 
             try {
                 Transaction txn = parseToTransaction(line);
@@ -89,6 +91,64 @@ public class LedgerServer {
         long timestamp = System.currentTimeMillis();
 
         return new Transaction(txnId, accountId, type, amount, timestamp);
+    }
+
+    private static void handleRead(String line, PrintWriter out) {
+        String [] parts = line.split(",");
+        if(parts.length != 3)
+        {
+            out.println("ERROR, BAD_READ_REQUEST");
+            return;
+        }
+
+        int offset;
+        int maxLines;
+        try {
+            offset = Integer.parseInt(parts[1].trim());
+            maxLines = Integer.parseInt(parts[2].trim());
+        }catch (NumberFormatException e)
+        {
+            out.println("ERROR, BAD_READ_REQUEST");
+            return;
+        }
+
+        if(offset < 0 || maxLines < 0)
+        {
+            out.println("ERROR, BAD_READ_REQUEST");
+            return;
+        }
+        String [] buffer = new String[maxLines];
+
+        int sent = 0 ;
+        try(BufferedReader reader = new BufferedReader(new FileReader(LOG_PATH.toFile()))) {
+
+            for (int i = 0 ; i < offset ;i++)
+            {
+                if(reader.readLine() == null)
+                {
+                    out.println("OK,READ," + offset);
+                    out.println("END");
+                    return;
+                }
+            }
+
+            String txnLine;
+            while(sent < maxLines &&(txnLine = reader.readLine()) != null){
+               buffer[sent++] = txnLine;
+            }
+
+            int nextOffset = offset + sent;
+            out.println("OK,READ," + nextOffset);
+            for (int i = 0; i < sent; i++) {
+                out.println(buffer[i]);
+            }
+            out.println("END");
+
+
+        }catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
     }
 
 
