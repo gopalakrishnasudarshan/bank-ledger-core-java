@@ -3,6 +3,10 @@ package com.bankledger.server;
 import com.bankledger.model.Transaction;
 import com.bankledger.model.TransactionType;
 import com.bankledger.storage.LedgerWriter;
+import com.bankledger.storage.ShardRouter;
+import com.bankledger.storage.ShardedLedgerWriter;
+import com.bankledger.storage.partition.HashPartitionStrategy;
+import com.bankledger.storage.partition.PartitionStrategy;
 
 import java.io.*;
 import java.net.ServerSocket;
@@ -18,10 +22,15 @@ public class LedgerServer {
     private static final Path LOG_PATH = Path.of("transactions.log");
     private static final AtomicLong TXN_ID_SEQ = new AtomicLong(1);
     private static final ExecutorService pool = Executors.newFixedThreadPool(3);
+    private static final int SHARD_COUNT = 3;
+    private static final Path BASE_DIR = Path.of(".");
+    private static final String FILE_PREFIX = "transactions";
 
     public static void main(String[] args) throws IOException {
 
-        LedgerWriter ledgerWriter = new LedgerWriter(LOG_PATH);
+        PartitionStrategy partitionStrategy = new HashPartitionStrategy(SHARD_COUNT);
+        ShardRouter router = new ShardRouter(BASE_DIR,FILE_PREFIX,partitionStrategy);
+        ShardedLedgerWriter shardedLedgerWriter = new ShardedLedgerWriter(router);
 
         // When the application is terminated , this makes sure the thread pool is shut down gracefully.
         //To make sure that the worker threads are not left running and ensures server exits cleanly.
@@ -38,14 +47,14 @@ public class LedgerServer {
                 Socket client = serverSocket.accept();
                 pool.submit(() ->
 
-                        handleClient(client, ledgerWriter));
+                        handleClient(client, shardedLedgerWriter, router));
             }
         }
 
 
     }
 
-    private static void handleClient(Socket client, LedgerWriter ledgerWriter) {
+    private static void handleClient(Socket client, ShardedLedgerWriter ledgerWriter, ShardRouter router) {
         try (client;
 
              BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
@@ -58,7 +67,7 @@ public class LedgerServer {
             }
             if(line.startsWith("READ,"))
             {
-                handleRead(line,out);
+                handleRead(line,out, router);
                 return;
             }
 
@@ -69,7 +78,7 @@ public class LedgerServer {
                 System.out.println("Transaction Saved: " + txn);
                 out.println("OK," + txn.getTransactionId());
             } catch (IllegalArgumentException e) {
-                out.println("ERROR, invalid BAD_REQUEST");
+                out.println("ERROR,invalid BAD_REQUEST");
             }
 
         } catch (IOException e) {
@@ -93,40 +102,44 @@ public class LedgerServer {
         return new Transaction(txnId, accountId, type, amount, timestamp);
     }
 
-    private static void handleRead(String line, PrintWriter out) {
+    private static void handleRead(String line, PrintWriter out, ShardRouter router) {
         String [] parts = line.split(",");
-        if(parts.length != 3)
+        if(parts.length != 4)
         {
-            out.println("ERROR, BAD_READ_REQUEST");
+            out.println("ERROR,BAD_READ_REQUEST");
             return;
         }
 
+        int shardId;
         int offset;
         int maxLines;
         try {
-            offset = Integer.parseInt(parts[1].trim());
-            maxLines = Integer.parseInt(parts[2].trim());
+            shardId = Integer.parseInt(parts[1].trim());
+            offset = Integer.parseInt(parts[2].trim());
+            maxLines = Integer.parseInt(parts[3].trim());
         }catch (NumberFormatException e)
         {
-            out.println("ERROR, BAD_READ_REQUEST");
+            out.println("ERROR,BAD_READ_REQUEST");
             return;
         }
 
-        if(offset < 0 || maxLines < 0)
+        if(shardId < 0 || shardId >= SHARD_COUNT || offset < 0 || maxLines < 0)
         {
-            out.println("ERROR, BAD_READ_REQUEST");
+            out.println("ERROR,BAD_READ_REQUEST");
             return;
         }
+
+        Path shardPath = router.shardPath(shardId);
         String [] buffer = new String[maxLines];
-
         int sent = 0 ;
-        try(BufferedReader reader = new BufferedReader(new FileReader(LOG_PATH.toFile()))) {
 
-            for (int i = 0 ; i < offset ;i++)
+        try(BufferedReader reader = new BufferedReader(new FileReader(shardPath.toFile()))) {
+
+            for (int i = 0 ; i < offset; i++)
             {
                 if(reader.readLine() == null)
                 {
-                    out.println("OK,READ," + offset);
+                    out.println("OK,READ," + shardId + "," + offset);
                     out.println("END");
                     return;
                 }
@@ -138,15 +151,18 @@ public class LedgerServer {
             }
 
             int nextOffset = offset + sent;
-            out.println("OK,READ," + nextOffset);
+            out.println("OK,READ," +shardId+ "," +nextOffset);
             for (int i = 0; i < sent; i++) {
                 out.println(buffer[i]);
             }
             out.println("END");
 
 
+        }catch (FileNotFoundException e) {
+            out.println("OK,READ," + shardId + "," + offset);
+            out.println("END");
         }catch (IOException e) {
-            throw new RuntimeException(e);
+            out.println("ERROR,READ_FAILED");
         }
 
     }
